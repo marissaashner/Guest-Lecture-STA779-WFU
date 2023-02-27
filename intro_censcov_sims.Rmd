@@ -1,0 +1,201 @@
+---
+title: 'An Introduction to Censored Covariates: Simulation'
+author: "Marissa Ashner"
+date: "2/28/2023"
+output:
+  html_document:
+    theme: cerulean
+    code_folding: show
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+### Data Generation 
+
+The first part of a simulation is generating the data. We want to generate data that follows this model: 
+
+$$y = \beta_1 + \beta_2X + \beta_3Z + \epsilon$$
+where $C$ is a censoring value for $X$, $\Delta = I(X\leq C)$, and $W = \min(X,C)$.
+
+```{r}
+# GENERATE SOME DATA 
+
+# n is the sample size 
+n = 2000
+
+# r is the censoring rate (the proportion of observations you want censored)
+r = 0.7
+
+# Generate X from a Uniform(0,10)
+X = runif(n, 0, 10)
+
+# In order to hit the desired censoring rate, generate C from a Uniform(0, 20(1-r))
+## PRACTICE: How was this formula determined?
+C = runif(n, 0, 20*(1-r))
+
+# calculate the observed variables 
+W = pmin(X, C)
+D = ifelse(X <= C, 1, 0)
+
+# Generate the other covariate Z from a standard normal
+Z = rnorm(n)
+
+# Errors will be generated from a standard normal
+eps = rnorm(n)
+
+# Let all parameters be 1
+beta = c(1, 1, 1)
+
+# generate the outcome y
+y = beta[1] + beta[2]*X + beta[3]*Z + eps
+
+# put all variables into a data frame
+data_sim = data.frame(W = W, D = D, Z = Z, y = y, X = X, C = C)
+```
+
+### The Oracle Estimator 
+
+In a real data set, we will be handed the variables, $W, \Delta, Z, y$ and we won't know $X$ or $C$ fully. However, in a simulation, since we generated the data, we do know the values of $X$ and $C$. Therefore, we can determine what would happen if $X$ was not censored. We will call this the oracle estimator. 
+
+
+```{r}
+# If we knew the truth... the Oracle Estimator 
+
+output_oracle = lm(y~X+Z, data = data_sim)
+summary(output_oracle)
+```
+
+### The Naive Estimator
+
+What if we just replace $X$ with the observed $W$? This we can do in practice, since we observe $W$, but should we?
+
+```{r}
+# Naive Analysis 
+
+output_naive = lm(y~W+Z, data = data_sim)
+summary(output_naive)
+```
+
+### The Complete Case Estimator
+
+What if we delete all observations where $\Delta = 0$? This we can also do in practice, since we observe $X$ for all $\Delta = 1$. But should we?
+
+Note in the data generation that we generated $C$ to be completely independent of all other variables, meaning that given the covariates ($X, Z$ here), the probability of being a complete case does not depend on the outcome ($y$ in this case). Based on our notes, this should lead to a consistent estimator.
+
+
+```{r}
+# Complete Case Analysis using X as a censored covariate 
+
+data_sim_cc = data_sim %>% filter(D == 1)
+output_cc = lm(y~W+Z, data = data_sim_cc)
+summary(output_cc)
+```
+
+### What if the outcome is censored instead? 
+
+What if instead, we want to estimate these parameters?:  
+
+$$X = \alpha_1 + \alpha_2y + \alpha_3Z + \epsilon_{\alpha}$$
+#### The Oracle Estimator 
+
+Let's use the oracle estimator to see what the value of $\alpha_2$ should be. 
+
+```{r}
+# If we knew the truth... the Oracle Estimator 
+
+output_oracle_alpha = lm(X~y+Z, data = data_sim)
+summary(output_oracle_alpha)
+```
+
+#### The Complete Case Estimator
+
+Now let's try the complete case analysis. As discussed in the notes, the probability of being censored is inherently dependent on the value of $X$, which is the outcome. Therefore, we shouldn't be guaranteed consistency of this estimator. 
+
+```{r}
+# Complete Case Analysis using X as a censored outcome 
+
+output_cc_alpha = lm(W~y+Z, data = data_sim_cc)
+summary(output_cc_alpha)
+```
+
+### Running a full simulation study 
+
+We just ran one simulation. The data we generated was random, and if we ran it again, we'd get a different set of data and different answers. To conduct a full simulation study, you should go through this process many times (100-1000), and save the parameter estimates. Then you can look at the distribution of parameter estimates and see if the mean is close to what you expect.
+
+This can be done by putting our previous code into some sort of function and/or for loop and saving the estimates at each iteration. You will want to set a seed before you start, so your work is reproducible. 
+
+#### Example simulation study for the complete case estimator for a censored covariate
+
+##### Defining the function
+
+```{r}
+simulation_cc <- function(seed){
+# GENERATE SOME DATA 
+  
+set.seed(seed)
+
+# n is the sample size 
+n = 2000
+
+# r is the censoring rate (the proportion of observations you want censored)
+r = 0.7
+
+# Generate X from a Uniform(0,10)
+X = runif(n, 0, 10)
+
+# In order to hit the desired censoring rate, generate C from a Uniform(0, 20(1-r))
+## PRACTICE: How was this formula determined?
+C = runif(n, 0, 20*(1-r))
+
+# calculate the observed variables 
+W = pmin(X, C)
+D = ifelse(X <= C, 1, 0)
+
+# Generate the other covariate Z from a standard normal
+Z = rnorm(n)
+
+# Errors will be generated from a standard normal
+eps = rnorm(n)
+
+# Let all parameters be 1
+beta = c(1, 1, 1)
+
+# generate the outcome y
+y = beta[1] + beta[2]*X + beta[3]*Z + eps
+
+# put all variables into a data frame
+data_sim = data.frame(W = W, D = D, Z = Z, y = y, X = X, C = C)
+
+data_sim_cc = data_sim %>% filter(D == 1)
+output_cc = lm(y~W+Z, data = data_sim_cc)
+estimates = summary(output_cc)$coeff[,1]
+
+return(estimates)
+}
+```
+
+##### Running the function
+```{r}
+# run the simulation 100 times for seeds 1 - 100
+estimates_100 = lapply(1:100, simulation_cc)
+
+# convert the output into a data frame
+estimates_df = as.data.frame(do.call(rbind, estimates_100))
+
+# what is the mean estimate for each parameter?
+colMeans(estimates_df)
+
+# Now let's plot the results
+
+## First convert the data frame into a long format
+estimates_long <- pivot_longer(estimates_df, cols = c(`(Intercept)`, W, Z))
+
+# Now use ggplot to visualize the results
+ggplot(estimates_long) + geom_boxplot(aes(y=value, fill=name))
+```
+
+
